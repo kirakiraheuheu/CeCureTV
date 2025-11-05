@@ -6,7 +6,8 @@ from email.mime.multipart import MIMEMultipart
 # (optional snapshot attachment)
 from email.mime.image import MIMEImage
 import certifi
-
+from datetime import timedelta
+import tempfile, os
 import time, math, webbrowser
 import cv2
 import mediapipe as mp
@@ -14,6 +15,8 @@ import numpy as np
 from urllib.parse import urlencode
 from collections import deque
 from flask import Flask, request, redirect, render_template, session, url_for
+from flask_session import Session
+from helpers import login_required
 import sqlite3, os, binascii, hashlib, re, threading, webbrowser
 from pathlib import Path
 
@@ -71,7 +74,7 @@ SIGNUP_REASONS = [
     "General home security",
     "Other",
 ]
-
+global user_c_id
 '''PBKDF2_ITERS = 200_000
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
@@ -151,6 +154,14 @@ def find_user_by_username(conn, username):
     r = cur.fetchone()
     if not r: return None
     return {"id": r[0], "name": r[1], "username": r[2], "password_hash": r[3], "emails": r[4], "reason": r[5]}
+
+def find_user_by_id(conn, uid: int):
+    cur = conn.cursor()
+    cur.execute("SELECT id,name,username,password_hash,emails,reason FROM users WHERE id=?", (uid,))
+    r = cur.fetchone()
+    if not r: return None
+    return {"id": r[0], "name": r[1], "username": r[2], "password_hash": r[3], "emails": r[4], "reason": r[5]}
+
 
 def insert_user(conn, name, username, password_hash, emails, reason):
     cur = conn.cursor()
@@ -300,12 +311,27 @@ def send_email(kind, frame=None):
         print("❌ Email send failed:", e)   
 
 app = Flask(__name__)  # templates/ and static/ will be picked up automatically
+app.config.update(
+    SESSION_COOKIE_NAME="cecurecam_session",
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=False,           # http://127.0.0.1
+    SESSION_COOKIE_DOMAIN=None,
+    SESSION_COOKIE_PATH="/",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=0.1),
+    SESSION_PERMANENT=False,
+    SESSION_TYPE="filesystem",
+    SESSION_FILE_DIR=os.path.join(tempfile.gettempdir(), "cecurecam_sessions"),
+)
+os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
+
 app.secret_key = os.environ.get("CECURECAM_SECRET", "dev-secret-please-change")
+Session(app)
 _start_event = threading.Event()
 _selected_profile = {"emails": [], "name": "", "username": "", "reason": ""}
 @app.route("/")
 def index():
-    if session.get("u"):
+    if session.get("user_id"):
         return redirect(url_for("dashboard"))
     return redirect(url_for("login"))
 
@@ -315,18 +341,23 @@ def login():
     if request.method == "POST":
         uname = request.form.get("username","").strip()
         pw = request.form.get("password","").strip()
+
         with init_user_db() as conn:
             u = find_user_by_username(conn, uname)
-            print("User is:", u)
-            if u:
-                print("password_hash repr:", repr(u.get("password_hash")))
 
         if not u or not verify_password(pw, u["password_hash"] or ""):
             err = "Invalid username or password."
         else:
-            session["u"] = u["username"]
-            return redirect(url_for("dashboard"))
+            # rotate session & set the key your helper expects
+            session.clear()
+            session["user_id"]  = u["id"]
+            session["username"] = u["username"]   # optional, handy for UI
+            session.permanent   = True
+            session.modified    = True
+            return redirect(url_for("dashboard"), code=303)
+
     return render_template("login.html", err=err)
+
 
 @app.route("/register", methods=["GET","POST"])
 def register():
@@ -349,31 +380,34 @@ def register():
                 err = "Enter valid email(s), comma-separated if multiple."
             else:
                 with init_user_db() as conn:
+                    # was: if find_user_by_id(conn, session["user_id"]):
                     if find_user_by_username(conn, username):
                         err = "Username already taken."
                     else:
-                        insert_user(conn, name, username, hash_password(pw1), ",".join(email_list), reason or SIGNUP_REASONS[0])
+                        insert_user(conn, name, username, hash_password(pw1),
+                                    ",".join(email_list), reason or SIGNUP_REASONS[0])
                         return redirect(url_for("login"))
     return render_template("register.html", err=err, reasons=SIGNUP_REASONS)
 
 @app.route("/dashboard")
+@login_required
 def dashboard():
-    if not session.get("u"):
-        return redirect(url_for("login"))
-    uname = session["u"]
+    uid = session.get("user_id")      
     with init_user_db() as conn:
-        u = find_user_by_username(conn, uname)
+        u = find_user_by_id(conn, uid)
     if not u:
         session.clear()
         return redirect(url_for("login"))
     return render_template("dashboard.html", u=u)
 
 @app.route("/start", methods=["POST"])
+@login_required
 def start():
-    if not session.get("u"):
+    uid = session.get("user_id")
+    if not uid:
         return redirect(url_for("login"))
     with init_user_db() as conn:
-        u = find_user_by_username(conn, session["u"])
+        u = find_user_by_id(conn, uid)
     if not u:
         return redirect(url_for("login"))
     _selected_profile.update({

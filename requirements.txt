@@ -1,5 +1,7 @@
 opencv-python
-mediapipe
+mediapipe == 0.10.14
 numpy
 Flask
 certifi
+Flask-Session
+requests
