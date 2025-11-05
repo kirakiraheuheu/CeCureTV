@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CeCureCam{% endblock %}
+{% block body %}
+  <h1>Welcome, {{u.name}} 👋</h1>
+  <p class="notice">
+    <b>Reason:</b> {{u.reason}}<br>
+    <b>Alert emails:</b> {{u.emails}}
+  </p>
+  <form method="post" action="{{url_for('start')}}">
+    <button class="btn">Start CeCureCam</button>
+    <a class="btn secondary" href="{{url_for('logout')}}">Logout</a>
+  </form>
+{% endblock %}
