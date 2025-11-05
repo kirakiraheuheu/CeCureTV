@@ -13,6 +13,9 @@ import mediapipe as mp
 import numpy as np
 from urllib.parse import urlencode
 from collections import deque
+from flask import Flask, request, redirect, render_template, session, url_for
+import sqlite3, os, binascii, hashlib, re, threading, webbrowser
+from pathlib import Path
 
 # ------------- SETTINGS -------------
 PHONE_NUMBER   = "917044666982"      # digits only, with country code
@@ -57,6 +60,108 @@ EMAIL_APP_PASSWORD = "qltw qxfw dcox gsna"   # Gmail App Password or Outlook pas
 ALERT_RECIPIENTS   = [
     "kirahadropped@gmail.com",
 ]  # add more if you like
+
+DB_PATH = Path(__file__).with_name("cecurecam.db")
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SIGNUP_REASONS = [
+    "Elderly person prone to falls",
+    "Person with heart condition",
+    "Person with seizure disorder",
+    "Child home alone sometimes",
+    "General home security",
+    "Other",
+]
+
+'''PBKDF2_ITERS = 200_000
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERS)
+    return f"pbkdf2${PBKDF2_ITERS}${binascii.hexlify(salt).decode()}${binascii.hexlify(dk).decode()}"'''
+    
+import os, binascii, hashlib
+PBKDF2_ITERS = 200_000
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERS)
+    return f"pbkdf2${PBKDF2_ITERS}${binascii.hexlify(salt).decode()}${binascii.hexlify(dk).decode()}"
+
+
+'''def verify_password(password: str, stored: str) -> bool:
+    try:
+        scheme, iters_s, salt_hex, hash_hex = stored.split("$", 3)
+        if scheme != "pbkdf2": return False
+        iters = int(iters_s)
+        salt = binascii.unhexlify(salt_hex)
+        expected = binascii.unhexlify(hash_hex)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iters)
+        return hashlib.compare_digest(dk, expected)
+    except Exception:
+        return False'''
+        
+import binascii, hashlib, hmac
+
+def verify_password(password: str, stored: str) -> bool:
+    if not stored or not isinstance(stored, str):
+        print("[verify] stored hash missing/invalid:", stored)
+        return False
+    try:
+        stored = stored.strip()
+        parts = stored.split("$")
+        if len(parts) != 4:
+            print("[verify] bad format, expected 4 parts, got:", parts)
+            return False
+        scheme, iters_s, salt_hex, hash_hex = parts
+        if scheme.lower() != "pbkdf2":
+            print("[verify] unsupported scheme:", scheme)
+            return False
+        iters = int(iters_s)
+        salt = bytes.fromhex(salt_hex.strip())
+        expected = bytes.fromhex(hash_hex.strip())
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters)
+        ok = hmac.compare_digest(dk, expected)
+        if not ok:
+            print("[verify] digest mismatch")
+        return ok
+    except Exception as e:
+        print("[verify] exception:", repr(e), " stored=", repr(stored))
+        return False
+
+
+def init_user_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            username TEXT UNIQUE,
+            password_hash TEXT,
+            emails TEXT NOT NULL,    -- comma-separated
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    return conn
+
+def find_user_by_username(conn, username):
+    cur = conn.cursor()
+    cur.execute("SELECT id,name,username,password_hash,emails,reason FROM users WHERE username=?", (username,))
+    r = cur.fetchone()
+    if not r: return None
+    return {"id": r[0], "name": r[1], "username": r[2], "password_hash": r[3], "emails": r[4], "reason": r[5]}
+
+def insert_user(conn, name, username, password_hash, emails, reason):
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (name, username, password_hash, emails, reason, created_at) VALUES (?,?,?,?,?,datetime('now'))",
+        (name, username, password_hash, emails, reason)
+    )
+    conn.commit()
+
+
+
 
 # MediaPipe models
 mp_pose  = mp.solutions.pose
@@ -192,9 +297,112 @@ def send_email(kind, frame=None):
                 server.sendmail(EMAIL_ADDRESS, ALERT_RECIPIENTS, msg.as_string())
         print("✅ Email(s) sent.")
     except Exception as e:
-        print("❌ Email send failed:", e)
+        print("❌ Email send failed:", e)   
 
-def main():
+app = Flask(__name__)  # templates/ and static/ will be picked up automatically
+app.secret_key = os.environ.get("CECURECAM_SECRET", "dev-secret-please-change")
+_start_event = threading.Event()
+_selected_profile = {"emails": [], "name": "", "username": "", "reason": ""}
+@app.route("/")
+def index():
+    if session.get("u"):
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    err = ""
+    if request.method == "POST":
+        uname = request.form.get("username","").strip()
+        pw = request.form.get("password","").strip()
+        with init_user_db() as conn:
+            u = find_user_by_username(conn, uname)
+            print("User is:", u)
+            if u:
+                print("password_hash repr:", repr(u.get("password_hash")))
+
+        if not u or not verify_password(pw, u["password_hash"] or ""):
+            err = "Invalid username or password."
+        else:
+            session["u"] = u["username"]
+            return redirect(url_for("dashboard"))
+    return render_template("login.html", err=err)
+
+@app.route("/register", methods=["GET","POST"])
+def register():
+    err = ""
+    if request.method == "POST":
+        name = request.form.get("name","").strip()
+        username = request.form.get("username","").strip()
+        emails = request.form.get("emails","").strip()
+        reason = request.form.get("reason","").strip()
+        pw1 = request.form.get("pw1","").strip()
+        pw2 = request.form.get("pw2","").strip()
+
+        if not name or not username or not pw1:
+            err = "Name, username, password are required."
+        elif pw1 != pw2:
+            err = "Passwords do not match."
+        else:
+            email_list = [e.strip() for e in emails.split(",") if e.strip()]
+            if not email_list or not all(EMAIL_REGEX.match(e) for e in email_list):
+                err = "Enter valid email(s), comma-separated if multiple."
+            else:
+                with init_user_db() as conn:
+                    if find_user_by_username(conn, username):
+                        err = "Username already taken."
+                    else:
+                        insert_user(conn, name, username, hash_password(pw1), ",".join(email_list), reason or SIGNUP_REASONS[0])
+                        return redirect(url_for("login"))
+    return render_template("register.html", err=err, reasons=SIGNUP_REASONS)
+
+@app.route("/dashboard")
+def dashboard():
+    if not session.get("u"):
+        return redirect(url_for("login"))
+    uname = session["u"]
+    with init_user_db() as conn:
+        u = find_user_by_username(conn, uname)
+    if not u:
+        session.clear()
+        return redirect(url_for("login"))
+    return render_template("dashboard.html", u=u)
+
+@app.route("/start", methods=["POST"])
+def start():
+    if not session.get("u"):
+        return redirect(url_for("login"))
+    with init_user_db() as conn:
+        u = find_user_by_username(conn, session["u"])
+    if not u:
+        return redirect(url_for("login"))
+    _selected_profile.update({
+        "emails": [e.strip() for e in (u["emails"] or "").split(",") if e.strip()],
+        "name": u["name"], "username": u["username"], "reason": u["reason"]
+    })
+    '''_start_event.set()
+    return render_template("starting.html")'''
+    threading.Thread(target=_start_event.set, daemon=True).start()
+    return render_template("starting.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+def run_camera(profile):
+    global ALERT_RECIPIENTS, LOCATION_NAME
+    # Use logged-in user's emails
+    if profile.get("emails"):
+        ALERT_RECIPIENTS = profile["emails"]
+    # You can also personalize location name:
+    # LOCATION_NAME = f"{profile.get('name','Home')}'s Home"
+
+    # >>> everything that was inside your old main() loop goes here unchanged <<<
+    # keep the body of your while True ... camera loop exactly as you have it.
+    # (Do not redefine send_email etc.)
+    # Just replace the function name 'main()' with 'run_camera(profile)'.
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Camera not found.")
@@ -373,6 +581,16 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    
+def launch_site_and_wait():
+    # start Flask in a background thread
+    t = threading.Thread(target=lambda: app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False), daemon=True)
+    t.start()
+    webbrowser.open("http://127.0.0.1:5000", new=2)
+    print("🔗 Opened http://127.0.0.1:5000 — register/login, then click 'Start CeCureCam'")
+    _start_event.wait()  # blocks until /start is hit
+    return dict(_selected_profile)
 
 if __name__ == "__main__":
-    main()
+    profile = launch_site_and_wait()
+    run_camera(profile)
