@@ -1,32 +1,46 @@
 <!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{% block title %}CeCureCam{% endblock %}</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b1220; color:#e9eef7; margin:0; }
-    .wrap { max-width: 720px; margin: 40px auto; padding: 24px; background:#121a2b; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-    h1 { margin-top:0; font-size: 24px; }
-    a { color:#8bc8ff; text-decoration:none; }
-    input, select { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2c3a55; background:#0e1524; color:#e9eef7; margin-top:6px; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap:14px; }
-    .btn { background:#2b82f6; color:#fff; padding:10px 14px; border:none; border-radius:10px; cursor:pointer; }
-    .btn.secondary { background:#202b44; }
-    .notice { background:#0e1a34; border:1px solid #203055; padding:10px 12px; border-radius:10px; color:#b9c7e6; }
-    .err { color:#ff9fa0; }
-    label { font-size: 13px; color:#b7c5e6; }
-    .topbar { text-align:right; margin-bottom: 6px; }
-  </style>
-  {% block head %}{% endblock %}
-</head>
-<body>
-  <div class="wrap">
-    <div class="topbar">
-      {% if session.get('u') %}
-        <span>Logged in as <b>{{session['u']}}</b></span> · <a href="{{url_for('logout')}}">Logout</a>
-      {% endif %}
-    </div>
-    {% block body %}{% endblock %}
-  </div>
-</body>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{% block title %}CeCureCam{% endblock %}</title>
+
+    <!-- Brand styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <!-- Header -->
+    <header class="cc-header">
+      <div class="cc-container cc-header-inner">
+        <div class="cc-brand">
+          <!-- Put your exported logo as static/logo.png or .svg -->
+          <img src="{{ url_for('static', filename='logo.png') }}" alt="CeCureTV logo" class="cc-logo" />
+          <span class="cc-wordmark">CeCureTV</span>
+        </div>
+
+        <nav class="cc-nav">
+          {% if session.get('u') %}
+            <span class="cc-user">Signed in as <b>{{ session['u'] }}</b></span>
+            <a class="cc-link" href="{{ url_for('logout') }}">Logout</a>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main card -->
+    <main class="cc-container">
+      <section class="cc-card">
+        {% block body %}{% endblock %}
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="cc-footer">
+      <div class="cc-container">
+        <small>© {{ 2025 }} CeCureTV </small>
+      </div>
+    </footer>
+  </body>
 </html>
