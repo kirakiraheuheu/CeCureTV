@@ -430,13 +430,6 @@ def run_camera(profile):
     # Use logged-in user's emails
     if profile.get("emails"):
         ALERT_RECIPIENTS = profile["emails"]
-    # You can also personalize location name:
-    # LOCATION_NAME = f"{profile.get('name','Home')}'s Home"
-
-    # >>> everything that was inside your old main() loop goes here unchanged <<<
-    # keep the body of your while True ... camera loop exactly as you have it.
-    # (Do not redefine send_email etc.)
-    # Just replace the function name 'main()' with 'run_camera(profile)'.
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Camera not found.")
