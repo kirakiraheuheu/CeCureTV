@@ -60,7 +60,8 @@ DEMO_MODE = False           # True = print what would be sent, don't send
 SMTP_SERVER = "smtp.gmail.com"  # Gmail: "smtp.gmail.com" (SSL=465) | Outlook: "smtp.office365.com" (TLS=587)
 SMTP_PORT   = 465               # Gmail SSL: 465 | Outlook TLS: 587
 EMAIL_ADDRESS      = "cecuretv.emergency@gmail.com"
-EMAIL_APP_PASSWORD = "qltw qxfw dcox gsna"   # Gmail App Password or Outlook password
+#EMAIL_APP_PASSWORD = "qltw qxfw dcox gsna"   # Gmail App Password or Outlook password
+EMAIL_APP_PASSWORD = "tvwa vcvt dzvw hoql"
 ALERT_RECIPIENTS   = [
     "kirahadropped@gmail.com",
 ]  # add more if you like
