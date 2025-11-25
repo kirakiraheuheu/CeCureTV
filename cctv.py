@@ -28,6 +28,7 @@ LOCATION_NAME  = "Home (Demo)"
 HANDS_UP_HOLD            = 1.5
 CONFIRM_GESTURE_HOLD     = 1.0
 PENDING_TIMEOUT_SECONDS  = 8.0
+AUTO_FALL_EMAIL_DELAY    = 10.0
 
 # Core fall heuristics
 FALL_HOLD                = 0.7
@@ -562,30 +563,72 @@ def run_camera(profile):
             confirm_start = None
             sent_once = False
 
+                # --- Pending & confirm via open palm ---
         if pending:
-            remaining = max(0.0, PENDING_TIMEOUT_SECONDS - (time.time() - pending['start']))
-            draw_banner(frame, f"PENDING {pending['type']}: show OPEN PALM to CONFIRM",
-                        f"Time left: {remaining:.1f}s")
+            now_ts = time.time()
+            elapsed   = now_ts - pending["start"]
+            remaining = max(0.0, PENDING_TIMEOUT_SECONDS - elapsed)
+
+            # line 2 text (shows both cancel + auto-email info for falls)
+            if pending["type"] == "FALL":
+                auto_in = max(0.0, AUTO_FALL_EMAIL_DELAY - elapsed)
+                line2 = f"Time left: {remaining:.1f}s | Auto email in {auto_in:.1f}s"
+            else:
+                line2 = f"Time left: {remaining:.1f}s"
+
+            draw_banner(
+                frame,
+                f"PENDING {pending['type']}: show OPEN PALM to CONFIRM",
+                line2,
+            )
+
             confirmed_now = False
             if hands_res and hands_res.multi_hand_landmarks:
                 any_confirm = any(open_palm(hh) for hh in hands_res.multi_hand_landmarks)
                 if any_confirm:
-                    if confirm_start is None: confirm_start = time.time()
-                    held = time.time() - confirm_start
-                    cv2.putText(frame, f"Confirm hold: {held:.1f}s", (12, 54),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220,240,255), 2)
+                    if confirm_start is None:
+                        confirm_start = now_ts
+                    held = now_ts - confirm_start
+                    cv2.putText(
+                        frame,
+                        f"Confirm hold: {held:.1f}s",
+                        (12, 54),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (220, 240, 255),
+                        2,
+                    )
                     if held >= CONFIRM_GESTURE_HOLD:
                         confirmed_now = True
                 else:
                     confirm_start = None
+
+            # 1️⃣ If user confirms with open palm → send immediately
             if confirmed_now and not sent_once:
-                kind = "HELP gesture" if pending['type']=="HELP" else "Fall"
-                send_email(kind, frame)   # ✅ send email + attach current snapshot
+                kind = "HELP gesture" if pending["type"] == "HELP" else "Fall (confirmed)"
+                send_email(kind, frame)
                 sent_once = True
                 pending = None
 
-            if remaining <= 0 and pending:
-                draw_banner(frame, "No confirm — cancelled.", "Returning to monitoring…", color=(0,130,0))
+            # 2️⃣ Auto-email for falls after AUTO_FALL_EMAIL_DELAY seconds
+            if (
+                pending
+                and pending["type"] == "FALL"
+                and elapsed >= AUTO_FALL_EMAIL_DELAY
+                and not sent_once
+            ):
+                send_email("Fall (auto timeout)", frame)
+                sent_once = True
+                pending = None
+
+            # 3️⃣ For non-fall alerts (HELP) we still cancel if user does nothing
+            if pending and pending["type"] != "FALL" and remaining <= 0:
+                draw_banner(
+                    frame,
+                    "No confirm — cancelled.",
+                    "Returning to monitoring…",
+                    color=(0, 130, 0),
+                )
                 pending = None
         else:
             draw_banner(frame, "Monitoring…", ui_top, color=(40,40,40))
