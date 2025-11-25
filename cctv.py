@@ -563,13 +563,11 @@ def run_camera(profile):
             confirm_start = None
             sent_once = False
 
-                # --- Pending & confirm via open palm ---
         if pending:
             now_ts = time.time()
             elapsed   = now_ts - pending["start"]
             remaining = max(0.0, PENDING_TIMEOUT_SECONDS - elapsed)
 
-            # line 2 text (shows both cancel + auto-email info for falls)
             if pending["type"] == "FALL":
                 auto_in = max(0.0, AUTO_FALL_EMAIL_DELAY - elapsed)
                 line2 = f"Time left: {remaining:.1f}s | Auto email in {auto_in:.1f}s"
@@ -603,14 +601,12 @@ def run_camera(profile):
                 else:
                     confirm_start = None
 
-            # 1️⃣ If user confirms with open palm → send immediately
             if confirmed_now and not sent_once:
                 kind = "HELP gesture" if pending["type"] == "HELP" else "Fall (confirmed)"
                 send_email(kind, frame)
                 sent_once = True
                 pending = None
 
-            # 2️⃣ Auto-email for falls after AUTO_FALL_EMAIL_DELAY seconds
             if (
                 pending
                 and pending["type"] == "FALL"
@@ -621,7 +617,6 @@ def run_camera(profile):
                 sent_once = True
                 pending = None
 
-            # 3️⃣ For non-fall alerts (HELP) we still cancel if user does nothing
             if pending and pending["type"] != "FALL" and remaining <= 0:
                 draw_banner(
                     frame,
@@ -636,7 +631,7 @@ def run_camera(profile):
         # ---- Add watermark before showing ----
         frame = add_watermark(frame, logo, alpha=0.80, scale=0.22, pos="bottom-right")
 
-        # (Optional) motion mask thumbnail
+        # motion mask thumbnail
         thumb = cv2.resize(motion_mask, (160, 90))
         frame[10:10+90, w-10-160:w-10] = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
         cv2.rectangle(frame, (w-10-160,10), (w-10, 10+90), (80,80,80), 1)
