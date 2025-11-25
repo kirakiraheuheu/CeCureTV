@@ -182,7 +182,7 @@ hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2,
                        min_detection_confidence=0.4, min_tracking_confidence=0.4)
 #hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.6, min_tracking_confidence=0.6)
 # ----- Load the CeCureCam logo (watermark) -----
-logo = cv2.imread("logo.png", cv2.IMREAD_UNCHANGED)
+logo = cv2.imread("static/logo.png", cv2.IMREAD_UNCHANGED)
 if logo is None:
     print("⚠️  Logo not found! Make sure 'logo.png' is in the same folder as cctv.py.")
 
